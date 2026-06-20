@@ -14,7 +14,8 @@ export function SettingsPanel() {
     <Card className="p-5">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between"
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 focus-visible:ring-offset-2"
       >
         <div className="flex items-center gap-2">
           <Wrench size={18} className="text-zinc-500" />

@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getPreflightStatus, type PreflightStatusPayload } from "@/lib/api";
-import { useInterval } from "./useInterval";
 
 export type PreflightState = {
   data: PreflightStatusPayload | null;
@@ -15,6 +14,8 @@ export function usePreflight(pollInterval = 5000): PreflightState {
   const [data, setData] = useState<PreflightStatusPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const callbackRef = useRef<(() => void) | undefined>(undefined);
 
   const refetch = useCallback(async (force = false) => {
     try {
@@ -29,13 +30,44 @@ export function usePreflight(pollInterval = 5000): PreflightState {
     }
   }, []);
 
-  useEffect(() => {
-    refetch();
-  }, [refetch]);
+  callbackRef.current = refetch;
 
-  useInterval(() => {
-    refetch();
-  }, pollInterval);
+  useEffect(() => {
+    callbackRef.current?.();
+  }, []);
+
+  useEffect(() => {
+    function startTimer() {
+      if (timerRef.current) return;
+      timerRef.current = setInterval(() => callbackRef.current?.(), pollInterval);
+    }
+
+    function stopTimer() {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    }
+
+    function handleVisibility() {
+      if (document.visibilityState === "visible") {
+        callbackRef.current?.();
+        startTimer();
+      } else {
+        stopTimer();
+      }
+    }
+
+    if (document.visibilityState === "visible") {
+      startTimer();
+    }
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      stopTimer();
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [pollInterval]);
 
   return { data, loading, error, refetch };
 }

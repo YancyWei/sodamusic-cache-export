@@ -34,7 +34,8 @@ export function SourceList({ state, mp3TranscoderFound, jobRunning, defaultForma
     <Card className="p-5">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between"
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-between focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30 focus-visible:ring-offset-2"
       >
         <div className="text-left">
           <h3 className="font-semibold text-zinc-900">已选择 {selected} 首</h3>
