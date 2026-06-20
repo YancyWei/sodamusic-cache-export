@@ -9,15 +9,6 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
-  async rewrites() {
-    if (process.env.NODE_ENV === "production") return [];
-    return [
-      {
-        source: "/api/:path*",
-        destination: "http://127.0.0.1:8765/api/:path*",
-      },
-    ];
-  },
 };
 
 export default nextConfig;

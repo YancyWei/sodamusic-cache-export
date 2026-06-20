@@ -385,7 +385,7 @@ def parse_entries(entries_db: Path) -> list[dict[str, Any]]:
                 try:
                     reader = MsgpackrReader(data[match.start():])
                     obj = reader.unpack()
-                    if isinstance(obj, dict) and obj.get("chunkId") and obj.get("info"):
+                    if isinstance(obj, dict) and record_cache_uuid(obj) and obj.get("info"):
                         records.append(obj)
                 except (EOFError, ValueError, struct.error):
                     continue
@@ -420,6 +420,17 @@ def compact_names(items: list[Any]) -> str:
         if name and name not in names:
             names.append(str(name))
     return ", ".join(names)
+
+
+def record_cache_uuid(record: dict[str, Any]) -> str:
+    value = record.get("chunkId")
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, (int, float)):
+        return str(value)
+    return ""
 
 
 def safe_filename(value: str, fallback: str = "Unknown") -> str:
@@ -1507,7 +1518,7 @@ def video_items(record: dict[str, Any]) -> list[dict[str, Any]]:
 def track_identity(record: dict[str, Any]) -> tuple[str, str, str, str, int | None]:
     info = record.get("info") or {}
     track = find_track(record) or {}
-    cache_uuid = str(record.get("chunkId") or "")
+    cache_uuid = record_cache_uuid(record)
     track_id = str(info.get("trackId") or track.get("id") or cache_uuid)
     title = str(track.get("name") or f"track-{track_id or cache_uuid}")
     artists = compact_names(track.get("artists") or []) or "Unknown Artist"
@@ -1573,7 +1584,7 @@ def quality_rank(quality: str, codec_type: str = "", extension: str = "") -> int
 
 
 def source_candidate(record: dict[str, Any], cache_dir: Path) -> SourceCandidate | None:
-    cache_uuid = str(record.get("chunkId") or "")
+    cache_uuid = record_cache_uuid(record)
     source = cache_dir / f"{cache_uuid}.bin"
     if not cache_uuid or not source.exists():
         return None
@@ -2003,7 +2014,7 @@ def build_export_record(
     info = record.get("info") or {}
     track = find_track(record) or {}
 
-    cache_uuid = str(record.get("chunkId") or "")
+    cache_uuid = record_cache_uuid(record)
     source = cache_dir / f"{cache_uuid}.bin"
     source_size = source.stat().st_size if source.exists() else 0
     video_item = selected_video_item(record, source_size=source_size or None)
@@ -2246,7 +2257,7 @@ def prepare_decoded_spades(
 
     spades: list[str] = []
     for record in records:
-        cache_uuid = str(record.get("chunkId") or "")
+        cache_uuid = record_cache_uuid(record)
         source = cache_dir / f"{cache_uuid}.bin"
         source_size = source.stat().st_size if source.exists() else None
         spade = record_spade(record, source_size=source_size)

@@ -755,6 +755,98 @@ class ExporterTests(unittest.TestCase):
         self.assertEqual("lossless", rows[0]["uncachedBest"]["quality"])
         self.assertEqual("flac", rows[0]["uncachedBest"]["codecType"])
 
+    def test_source_rows_ignores_non_scalar_chunk_id_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir()
+            write_fake_m4a(cache_dir / "cache-good.bin")
+            bad_record = source_record("cache-bad", quality="highest", size=40, bitrate=260000)
+            bad_record["chunkId"] = {"unexpected": "object"}
+            records = [
+                source_record("cache-good", quality="highest", size=40, bitrate=260000),
+                bad_record,
+            ]
+
+            rows = exporter.source_rows(records, cache_dir)
+
+        self.assertEqual(1, len(rows))
+        self.assertEqual("cache-good", rows[0]["cacheUuid"])
+        self.assertEqual(["cache-good"], [item["cacheUuid"] for item in rows[0]["cachedCandidates"]])
+
+    def test_web_preflight_tolerates_non_scalar_chunk_id_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "entries.db").write_bytes(b"")
+            write_fake_m4a(cache_dir / "cache-good.bin")
+            bad_record = source_record("cache-bad", quality="highest", size=40, bitrate=260000)
+            bad_record["chunkId"] = {"unexpected": "object"}
+            records = [source_record("cache-good", quality="highest", size=40, bitrate=260000), bad_record]
+            device_node = Path(tmp) / "device.node"
+            device_node.write_bytes(b"")
+            original_cache = web.preflight_cache
+            web.preflight_cache = None
+            with (
+                patch.object(web, "DEFAULT_CACHE_DIR", cache_dir),
+                patch.object(web, "DEFAULT_OUTPUT_DIR", Path(tmp) / "out"),
+                patch.object(web, "resolve_device_node_path", return_value=device_node),
+                patch.object(web, "parse_entries", return_value=records),
+                patch.object(web, "shutil_which", return_value="/usr/bin/node"),
+            ):
+                payload = web.build_preflight_payload(force=True)
+            web.preflight_cache = original_cache
+
+        self.assertEqual("", payload["sources"]["error"])
+        self.assertEqual(1, payload["sources"]["exportable"])
+
+    def test_record_cache_uuid_accepts_only_scalar_values(self) -> None:
+        self.assertEqual("cache-1", exporter.record_cache_uuid({"chunkId": " cache-1 "}))
+        self.assertEqual("42", exporter.record_cache_uuid({"chunkId": 42}))
+        self.assertEqual("3.5", exporter.record_cache_uuid({"chunkId": 3.5}))
+        self.assertEqual("", exporter.record_cache_uuid({"chunkId": None}))
+        self.assertEqual("", exporter.record_cache_uuid({"chunkId": {"bad": "value"}}))
+        self.assertEqual("", exporter.record_cache_uuid({"chunkId": ["bad", "value"]}))
+        self.assertEqual("", exporter.record_cache_uuid({"chunkId": True}))
+
+    def test_source_rows_returns_uncached_row_when_all_chunk_ids_are_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir()
+            bad_record = source_record("cache-bad", quality="highest", size=40, bitrate=260000)
+            bad_record["chunkId"] = {"unexpected": "object"}
+
+            rows = exporter.source_rows([bad_record], cache_dir)
+
+        self.assertEqual(1, len(rows))
+        self.assertEqual("", rows[0]["cacheUuid"])
+        self.assertEqual([], rows[0]["cachedCandidates"])
+        self.assertTrue(rows[0]["selected"] is False)
+
+    def test_web_preflight_with_only_invalid_chunk_id_records_reports_empty_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "cache"
+            cache_dir.mkdir()
+            (cache_dir / "entries.db").write_bytes(b"")
+            bad_record = source_record("cache-bad", quality="highest", size=40, bitrate=260000)
+            bad_record["chunkId"] = {"unexpected": "object"}
+            device_node = Path(tmp) / "device.node"
+            device_node.write_bytes(b"")
+            original_cache = web.preflight_cache
+            web.preflight_cache = None
+            with (
+                patch.object(web, "DEFAULT_CACHE_DIR", cache_dir),
+                patch.object(web, "DEFAULT_OUTPUT_DIR", Path(tmp) / "out"),
+                patch.object(web, "resolve_device_node_path", return_value=device_node),
+                patch.object(web, "parse_entries", return_value=[bad_record]),
+                patch.object(web, "shutil_which", return_value="/usr/bin/node"),
+            ):
+                payload = web.build_preflight_payload(force=True)
+            web.preflight_cache = original_cache
+
+        self.assertEqual("", payload["sources"]["error"])
+        self.assertEqual(0, payload["sources"]["exportable"])
+        self.assertEqual(1, payload["sources"]["total"])
+
     def test_cache_analyzer_reports_indexed_and_cached_quality_gap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             cache_dir = Path(tmp) / "cache"

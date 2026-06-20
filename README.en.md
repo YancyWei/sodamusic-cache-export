@@ -47,6 +47,34 @@ The launcher serves the local UI at:
 http://127.0.0.1:8765
 ```
 
+## Screenshot walkthrough
+
+### 1. Browse cached tracks and export in bulk
+
+- Check the top status card first to confirm the environment is ready and the exportable track count looks correct
+- Pick the global output format: playable audio, MP3, or FLAC
+- Leaving the selection count at zero and clicking `Export all` exports every currently exportable cached track
+- To export only part of the list, select rows directly or narrow the list first with search and quality filters
+
+![Browse cached tracks](docs/screenshots/guide-overview-tight.png)
+
+### 2. Search a specific track and wait for cache availability
+
+- Switch to `Search target track`
+- Enter a song title or `trackId`, and optionally add an artist name
+- Choose the desired target quality such as `lossless / flac`
+- Use `Search matches` to confirm the target first; if it has not been cached locally yet, use `Wait and export`
+
+![Search target track mode](docs/screenshots/guide-search-mode.png)
+
+### 3. Advanced options
+
+- `Dry run` performs parsing and preflight checks without writing output files
+- `Verify audio` adds extra playback validation after export, useful when checking decryption or transcoding behavior
+- These options can be toggled before running an export and do not require a separate save step
+
+![Advanced options expanded](docs/screenshots/guide-advanced-options.png)
+
 ## Requirements
 
 Required:

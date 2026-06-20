@@ -196,7 +196,7 @@ export type TargetPayload = {
   requireOutputMatch?: boolean;
 };
 
-const API_BASE = "";
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || "").replace(/\/$/, "");
 
 async function requestJson<T>(
   path: string,
