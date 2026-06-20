@@ -1,0 +1,5 @@
+pycryptodome>=3.20
+mutagen>=1.47
+
+# Development
+pytest>=8.0

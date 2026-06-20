@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Node / Next.js
+web/node_modules/
+web/.next/
+web/dist/
+
+# Built frontend output served by Python web server (generated from web/)
+src/web/
+
+# Distribution / build artifacts
+dist/
+
+# Environment / secrets
+.env
+.env.local
+.env.*
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Legacy backup
+src/web-legacy/
