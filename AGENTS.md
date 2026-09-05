@@ -121,7 +121,7 @@ Run the unit tests:
 python3 -m pytest tests/test_exporter.py
 ```
 
-The test suite currently contains 86 tests and covers exporter core logic, analyzer, watcher, target CLI, batch target, web server request handling, runtime dependency checks, and launcher readiness logic. All external tool integrations (`node`, `ffmpeg`, `device.node`, network cover downloads) are mocked.
+The test suite currently contains 347 tests and covers exporter core logic, analyzer, watcher, target CLI, batch target, web server request handling, runtime dependency checks, and launcher readiness logic. All external tool integrations (`node`, `ffmpeg`, `device.node`, network cover downloads) are mocked.
 
 Build the frontend (requires Node.js):
 
@@ -238,7 +238,7 @@ python3 src/target_sodamusic_cache.py \
 python3 -m pytest tests/
 ```
 
-- The current suite passes with 86 tests. New features should include tests that follow the existing mock-heavy, filesystem-isolated style.
+- The current suite passes with 347 tests. New features should include tests that follow the existing mock-heavy, filesystem-isolated style.
 
 ## Security considerations
 

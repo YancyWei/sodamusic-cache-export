@@ -126,6 +126,15 @@ class MsgpackrReaderTests(unittest.TestCase):
         self.assertEqual(["ignored"], reader.records[0x40])
         self.assertEqual(["title"], reader.records[0x41])
 
+    def test_top_level_c7_record_definition_then_reference(self) -> None:
+        # Top-level value starts with variable-length ext (0xC7) record definition,
+        # then a reference — unpack() must retry like 0xD4..0xD8 when unpack_ext
+        # returns None for the definition marker.
+        data = b"\xc7\x01\x72\x40" + pack(["name"]) + b"\x40" + pack("hello")
+        reader = exporter.MsgpackrReader(data)
+        self.assertEqual({"name": "hello"}, reader.unpack())
+        self.assertEqual(["name"], reader.records[0x40])
+
     def test_eof_error(self) -> None:
         reader = exporter.MsgpackrReader(b"")
         with self.assertRaises(EOFError):

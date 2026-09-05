@@ -122,11 +122,20 @@ class MsgpackrReader:
         if code == 0xC6:
             return self.read(struct.unpack(">I", self.read(4))[0])
         if code == 0xC7:
-            return self.unpack_ext(self.read(1)[0])
+            result = self.unpack_ext(self.read(1)[0])
+            if result is None:
+                return self.unpack()
+            return result
         if code == 0xC8:
-            return self.unpack_ext(struct.unpack(">H", self.read(2))[0])
+            result = self.unpack_ext(struct.unpack(">H", self.read(2))[0])
+            if result is None:
+                return self.unpack()
+            return result
         if code == 0xC9:
-            return self.unpack_ext(struct.unpack(">I", self.read(4))[0])
+            result = self.unpack_ext(struct.unpack(">I", self.read(4))[0])
+            if result is None:
+                return self.unpack()
+            return result
         if code == 0xCA:
             return struct.unpack(">f", self.read(4))[0]
         if code == 0xCB:
