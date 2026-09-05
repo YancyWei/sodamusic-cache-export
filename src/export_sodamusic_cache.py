@@ -191,33 +191,61 @@ class MsgpackrReader:
                 raise ValueError(f"invalid msgpackr record definition {record_id}")
             self.records[record_id] = keys
             # Handle consecutive record definitions: keep processing while the
-            # next byte is another ext marker for 0x72 (record definition).
+            # next bytes are another ext marker for 0x72 (record definition).
             while self.pos < len(self.data):
                 next_byte = self.data[self.pos]
-                # Reference to this record - let unpack() handle it
+                # Reference to a record - let unpack() handle it
                 if 0x40 <= next_byte <= 0x7F:
                     return None
-                # Another ext marker (0xC7..0xC9) - check if it's another 0x72 definition
+                # Fixed-length ext markers (0xD4..0xD8)
+                if next_byte in (0xD4, 0xD5, 0xD6, 0xD7, 0xD8):
+                    lengths = {0xD4: 1, 0xD5: 2, 0xD6: 4, 0xD7: 8, 0xD8: 16}
+                    if self.pos + 1 >= len(self.data) or self.data[self.pos + 1] != 0x72:
+                        break
+                    payload_len = lengths[next_byte]
+                    self.pos += 2  # skip marker + ext type
+                    nested_payload = self.read(payload_len)
+                    nested_record_id = nested_payload[0]
+                    nested_keys = self.unpack()
+                    if not isinstance(nested_keys, list) or not all(
+                        isinstance(key, str) for key in nested_keys
+                    ):
+                        raise ValueError(
+                            f"invalid msgpackr record definition {nested_record_id}"
+                        )
+                    self.records[nested_record_id] = nested_keys
+                    continue
+                # Variable-length ext markers (0xC7..0xC9)
                 if next_byte in (0xC7, 0xC8, 0xC9):
-                    # Peek ahead to see if it's another record definition
                     saved_pos = self.pos
                     try:
                         ext_code = self.data[self.pos]
-                        self.pos += 1
+                        peek = self.pos + 1
                         if ext_code == 0xC7:
-                            ext_len = self.data[self.pos]; self.pos += 1
+                            ext_len = self.data[peek]
+                            peek += 1
                         elif ext_code == 0xC8:
-                            ext_len = struct.unpack(">H", self.data[self.pos:self.pos+2])[0]; self.pos += 2
+                            ext_len = struct.unpack(">H", self.data[peek : peek + 2])[0]
+                            peek += 2
                         else:  # 0xC9
-                            ext_len = struct.unpack(">I", self.data[self.pos:self.pos+4])[0]; self.pos += 4
-                        inner_ext_type = self.data[self.pos]
-                        if inner_ext_type == 0x72:
-                            # It's another record definition - continue the loop
-                            continue
-                        else:
-                            # Not a record definition - restore position and break
+                            ext_len = struct.unpack(">I", self.data[peek : peek + 4])[0]
+                            peek += 4
+                        if peek >= len(self.data) or self.data[peek] != 0x72:
                             self.pos = saved_pos
                             break
+                        # Fully consume this nested 0x72 definition.
+                        self.pos = peek + 1
+                        nested_payload = self.read(ext_len)
+                        nested_record_id = nested_payload[0]
+                        nested_keys = self.unpack()
+                        if not isinstance(nested_keys, list) or not all(
+                            isinstance(key, str) for key in nested_keys
+                        ):
+                            raise ValueError(
+                                f"invalid msgpackr record definition {nested_record_id}"
+                            )
+                        self.records[nested_record_id] = nested_keys
+                        continue
                     except (IndexError, struct.error):
                         self.pos = saved_pos
                         break
@@ -379,6 +407,8 @@ class ExportState:
 
 def parse_entries(entries_db: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
+    if entries_db.stat().st_size == 0:
+        return records
     with entries_db.open("rb") as fh:
         with mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) as data:
             for match in re.finditer(re.escape(RECORD_MARKER), data):
@@ -827,18 +857,36 @@ def sodamusic_app_candidates() -> list[Path]:
 def device_node_candidates(app_path: Path) -> list[Path]:
     arch = platform.machine().lower()
     unpacked_name = "app-arm64.asar.unpacked" if arch == "arm64" else "app-x64.asar.unpacked"
-    if sys.platform == "darwin":
-        return [
-            app_path / "Contents/Resources" / unpacked_name / "device.node",
-            app_path / "Contents/Resources/app.asar.unpacked/device.node",
-            app_path / "device.node",
-        ]
-    return [
+    mac_candidates = [
+        app_path / "Contents/Resources" / unpacked_name / "device.node",
+        app_path / "Contents/Resources/app.asar.unpacked/device.node",
+        app_path / "device.node",
+    ]
+    other_candidates = [
         app_path / "resources" / unpacked_name / "device.node",
         app_path / "resources/app.asar.unpacked/device.node",
         app_path / unpacked_name / "device.node",
         app_path / "device.node",
     ]
+    # Prefer macOS .app layout when the path looks like a bundle, even if the
+    # current host OS is not darwin (e.g. CI or a mounted app directory).
+    prefer_mac = (
+        sys.platform == "darwin"
+        or app_path.suffix.lower() == ".app"
+        or (app_path / "Contents").is_dir()
+    )
+    if prefer_mac:
+        ordered = mac_candidates + other_candidates
+    else:
+        ordered = other_candidates + mac_candidates
+    deduped: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in ordered:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
 
 
 def default_device_node_path(app_path: Path | None = None) -> Path:
@@ -918,8 +966,19 @@ process.stdout.write(JSON.stringify(result));
     return keys
 
 
+def _resolve_tool(command: str) -> str | None:
+    """Resolve a tool after augmenting PATH for common Homebrew locations."""
+    try:
+        from runtime_dependencies import ensure_tool_path
+
+        ensure_tool_path()
+    except ImportError:
+        pass
+    return shutil.which(command)
+
+
 def find_mp3_transcoder() -> str | None:
-    return shutil.which("ffmpeg")
+    return _resolve_tool("ffmpeg")
 
 
 def compact_error(value: str, limit: int = 400) -> str:
@@ -937,7 +996,7 @@ def run_media_command(command: list[str]) -> tuple[bool, str]:
 
 
 def probe_audio_output(path: Path) -> AudioProbeResult:
-    ffprobe = shutil.which("ffprobe")
+    ffprobe = _resolve_tool("ffprobe")
     if not ffprobe:
         return AudioProbeResult(error="ffprobe not found")
 
@@ -1018,7 +1077,7 @@ def can_decode_audio(path: Path, extension: str) -> tuple[bool, str]:
     if extension == "mp3":
         return True, ""
 
-    if ffmpeg := shutil.which("ffmpeg"):
+    if ffmpeg := _resolve_tool("ffmpeg"):
         return run_media_command(
             [
                 ffmpeg,
@@ -1035,7 +1094,7 @@ def can_decode_audio(path: Path, extension: str) -> tuple[bool, str]:
             ]
         )
 
-    if afconvert := shutil.which("afconvert"):
+    if afconvert := _resolve_tool("afconvert"):
         with tempfile.NamedTemporaryFile(prefix="soda-decode-", suffix=".wav", delete=False) as fh:
             temp_output = Path(fh.name)
         try:
@@ -1790,7 +1849,7 @@ def _resolve_source_state(
             state.skipped_reason = "encrypted media is missing spade key material"
         elif not fixed_key_hex and not device_node:
             state.skipped_reason = "SodaMusic device.node not found; cannot decode spade key"
-        elif not fixed_key_hex and not shutil.which("node"):
+        elif not fixed_key_hex and not _resolve_tool("node"):
             state.skipped_reason = "node executable not found; cannot load SodaMusic device.node"
         else:
             try:
@@ -2230,7 +2289,11 @@ def selected_records(
     if selection_items is None:
         return [(record, "") for record in records], []
 
-    by_uuid = {str(record.get("chunkId") or ""): record for record in records}
+    by_uuid = {
+        cache_uuid: record
+        for record in records
+        if (cache_uuid := record_cache_uuid(record))
+    }
     selected: list[tuple[dict[str, Any], str]] = []
     missing: list[str] = []
     for item in selection_items:
@@ -2252,7 +2315,7 @@ def prepare_decoded_spades(
     device_node: Path | None,
     progress: bool,
 ) -> dict[str, str]:
-    if output_formats <= {"original"} or raw_key or not device_node or not shutil.which("node"):
+    if output_formats <= {"original"} or raw_key or not device_node or not _resolve_tool("node"):
         return {}
 
     spades: list[str] = []
@@ -2397,6 +2460,12 @@ def main() -> int:
         help="Print one progress line per parsed cache record.",
     )
     args = parser.parse_args()
+    try:
+        from runtime_dependencies import ensure_tool_path
+
+        ensure_tool_path()
+    except ImportError:
+        pass
     if args.mp3_bitrate <= 0:
         parser.error("--mp3-bitrate must be greater than 0")
     raw_key = args.raw_key.strip().lower()

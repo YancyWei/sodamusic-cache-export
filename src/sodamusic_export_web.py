@@ -181,13 +181,23 @@ def text_response(handler: BaseHTTPRequestHandler, status: int, body: bytes, con
 
 
 def read_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    length = int(handler.headers.get("Content-Length") or "0")
-    if length <= 0:
+    raw_length = handler.headers.get("Content-Length") or "0"
+    try:
+        length = int(raw_length)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid Content-Length") from exc
+    if length < 0:
+        raise ValueError("invalid Content-Length")
+    if length == 0:
         return {}
     if length > MAX_REQUEST_BODY_BYTES:
         raise ValueError("request body too large")
     body = handler.rfile.read(length)
-    return json.loads(body.decode("utf-8"))
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("request body must be UTF-8") from exc
+    return json.loads(text)
 
 
 def as_path(value: Any, fallback: Path | None = None) -> Path:
@@ -806,19 +816,19 @@ def cleanup_old_jobs() -> None:
             for jid, j in jobs.items()
             if j.status in ("completed", "failed") and j.finished_at is not None
         ]
-        expired_ids = [
-            jid
-            for jid, j in completed_jobs
-            if now - j.finished_at > COMPLETED_JOB_MAX_AGE_SECONDS
+        for jid, job in completed_jobs:
+            if now - (job.finished_at or 0) > COMPLETED_JOB_MAX_AGE_SECONDS:
+                del jobs[jid]
+
+        remaining_completed = [
+            (jid, j)
+            for jid, j in jobs.items()
+            if j.status in ("completed", "failed") and j.finished_at is not None
         ]
-        for jid in expired_ids:
-            del jobs[jid]
-        if len(jobs) > COMPLETED_JOB_MAX_COUNT:
-            completed_jobs.sort(key=lambda x: x[1].finished_at or 0)
-            excess = len(jobs) - COMPLETED_JOB_MAX_COUNT
-            for jid, _ in completed_jobs[:excess]:
-                if jid in jobs:
-                    del jobs[jid]
+        if len(remaining_completed) > COMPLETED_JOB_MAX_COUNT:
+            remaining_completed.sort(key=lambda item: item[1].finished_at or 0)
+            for jid, _ in remaining_completed[:-COMPLETED_JOB_MAX_COUNT]:
+                del jobs[jid]
 
 
 def run_job(job: ExportJob) -> None:
@@ -929,6 +939,9 @@ class Handler(BaseHTTPRequestHandler):
             payload = read_json_body(self)
         except json.JSONDecodeError:
             json_response(self, HTTPStatus.BAD_REQUEST, {"error": "invalid JSON"})
+            return
+        except ValueError as exc:
+            json_response(self, HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
 
         if self.path == "/api/validate":

@@ -6,6 +6,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+import time
+from unittest import mock
 from unittest.mock import patch
 
 
@@ -2300,6 +2302,41 @@ class ExporterTests(unittest.TestCase):
                 self.assertTrue(output_dir.exists())
                 run.assert_called_once()
 
+    def test_web_cleanup_old_jobs_keeps_newest_completed(self) -> None:
+        web.jobs.clear()
+        now = time.time()
+        for index in range(5):
+            job = web.ExportJob(
+                id=f"job-{index}",
+                command=["true"],
+                cache_dir="/tmp/cache",
+                output_dir="/tmp/out",
+            )
+            job.status = "completed"
+            job.finished_at = now - (10 - index)
+            web.jobs[job.id] = job
+
+        with (
+            patch.object(web, "COMPLETED_JOB_MAX_AGE_SECONDS", 3600),
+            patch.object(web, "COMPLETED_JOB_MAX_COUNT", 2),
+        ):
+            web.cleanup_old_jobs()
+
+        self.assertEqual(["job-3", "job-4"], sorted(web.jobs))
+        web.jobs.clear()
+
+    def test_web_read_json_body_rejects_invalid_content_length(self) -> None:
+        handler = mock.Mock()
+        handler.headers = {"Content-Length": "not-a-number"}
+        with self.assertRaises(ValueError):
+            web.read_json_body(handler)
+
+    def test_web_read_json_body_rejects_oversized_body(self) -> None:
+        handler = mock.Mock()
+        handler.headers = {"Content-Length": str(web.MAX_REQUEST_BODY_BYTES + 1)}
+        with self.assertRaises(ValueError):
+            web.read_json_body(handler)
+
     def test_launcher_rejects_legacy_web_service_without_api_version(self) -> None:
         self.assertFalse(
             launcher.is_ready_response(
@@ -2337,6 +2374,23 @@ class ExporterTests(unittest.TestCase):
             with (
                 patch.object(deps, "EXTRA_PATHS", (str(tool_dir),)),
                 patch.dict(deps.os.environ, {"PATH": ""}),
+            ):
+                self.assertEqual(str(tool), deps.which("demo-tool"))
+
+    def test_dependency_which_resolves_windows_pathext(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tool_dir = Path(tmp)
+            tool = tool_dir / "demo-tool.EXE"
+            tool.write_text("fake", encoding="utf-8")
+            tool.chmod(0o755)
+            with (
+                patch.object(deps.os, "name", "nt"),
+                patch.object(deps, "EXTRA_PATHS", ()),
+                patch.dict(
+                    deps.os.environ,
+                    {"PATH": str(tool_dir), "PATHEXT": ".COM;.EXE;.BAT"},
+                    clear=False,
+                ),
             ):
                 self.assertEqual(str(tool), deps.which("demo-tool"))
 
