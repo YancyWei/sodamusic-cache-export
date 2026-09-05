@@ -101,6 +101,40 @@ class MsgpackrReaderTests(unittest.TestCase):
         self.assertEqual({"name": "first"}, first)
         self.assertEqual({"name": "second"}, second)
 
+    def test_consecutive_record_definitions_with_fixed_ext(self) -> None:
+        # Two consecutive 0xD4 record definitions, then a reference to the second.
+        data = (
+            b"\xd4\x72\x40"
+            + pack(["ignored"])
+            + b"\xd4\x72\x41"
+            + pack(["name"])
+            + b"\x41"
+            + pack("value")
+        )
+        reader = exporter.MsgpackrReader(data)
+        self.assertEqual({"name": "value"}, reader.unpack())
+        self.assertIn(0x40, reader.records)
+        self.assertIn(0x41, reader.records)
+
+    def test_consecutive_record_definitions_with_c7_ext(self) -> None:
+        # First definition via 0xD4, second via 0xC7 (1-byte length ext).
+        # 0xC7 | len=1 | type=0x72 | payload=record_id
+        second_def = b"\xc7\x01\x72\x41" + pack(["title"])
+        data = b"\xd4\x72\x40" + pack(["ignored"]) + second_def + b"\x41" + pack("song")
+        reader = exporter.MsgpackrReader(data)
+        self.assertEqual({"title": "song"}, reader.unpack())
+        self.assertEqual(["ignored"], reader.records[0x40])
+        self.assertEqual(["title"], reader.records[0x41])
+
+    def test_top_level_c7_record_definition_then_reference(self) -> None:
+        # Top-level value starts with variable-length ext (0xC7) record definition,
+        # then a reference — unpack() must retry like 0xD4..0xD8 when unpack_ext
+        # returns None for the definition marker.
+        data = b"\xc7\x01\x72\x40" + pack(["name"]) + b"\x40" + pack("hello")
+        reader = exporter.MsgpackrReader(data)
+        self.assertEqual({"name": "hello"}, reader.unpack())
+        self.assertEqual(["name"], reader.records[0x40])
+
     def test_eof_error(self) -> None:
         reader = exporter.MsgpackrReader(b"")
         with self.assertRaises(EOFError):
@@ -155,6 +189,14 @@ class ParseEntriesTests(unittest.TestCase):
 
         self.assertEqual(2, len(records))
         self.assertEqual({"cache-1", "cache-2"}, {record["chunkId"] for record in records})
+
+    def test_parse_entries_handles_empty_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            entries_db = Path(tmp) / "entries.db"
+            entries_db.write_bytes(b"")
+            records = exporter.parse_entries(entries_db)
+
+        self.assertEqual([], records)
 
 
 class UtilityTests(unittest.TestCase):

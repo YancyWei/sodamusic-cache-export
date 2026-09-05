@@ -44,10 +44,21 @@ def ensure_tool_path() -> None:
 
 def which(command: str) -> str | None:
     ensure_tool_path()
+    path_exts = [""]
+    if os.name == "nt":
+        # Mirror shutil.which: try PATHEXT suffixes so "node" finds node.exe.
+        raw_exts = os.environ.get("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        path_exts = [""] + [ext for ext in raw_exts.split(";") if ext]
+        if os.path.splitext(command)[1]:
+            path_exts = [""]
+
     for directory in os.environ.get("PATH", "").split(os.pathsep):
-        candidate = Path(directory) / command
-        if candidate.exists() and os.access(candidate, os.X_OK):
-            return str(candidate)
+        if not directory:
+            continue
+        for ext in path_exts:
+            candidate = os.path.join(directory, f"{command}{ext}")
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
     return None
 
 

@@ -285,7 +285,10 @@ def read_export_manifest(
         return []
     if not_before is not None:
         try:
-            if manifest_path.stat().st_mtime < not_before:
+            # Allow 1s slack: many filesystems store mtime with 1-second
+            # resolution, so a file written just after wall_started can still
+            # round down to an earlier second and look "stale".
+            if manifest_path.stat().st_mtime < not_before - 1:
                 return []
         except OSError:
             return []
